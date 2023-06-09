@@ -1,1 +1,23 @@
+version: 0.2
+phases:
 
+  install:
+    runtime-versions:
+      python: 3.7 
+    commands: 
+    
+      - echo WebHook Event = $CODEBUILD_WEBHOOK_EVENT 
+      - SOURCE_VERSION=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+
+      - pip3 install yamllint
+      
+  pre_build:
+    commands:
+      
+      - pip install -r requirements.txt
+ 
+  build:
+    commands:
+      - echo "Template file name to be used in build -> TEMPLATE"
+      - pwd
+      - ls -ltrh
