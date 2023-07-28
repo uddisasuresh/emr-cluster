@@ -1,0 +1,94 @@
+Parameters:
+  StageName:
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+  ApplicationPrefix:
+    Description: Prefix to identify the team.  (i.e. platform, ca, etc.)
+    Type: String
+Resources:
+    LambdaFunctionForEMR:
+        Type: AWS::Lambda::Function
+        Properties:
+          FunctionName: !Join ["", [!Ref "AWS::StackName","-lambda"]]
+          Handler: index.handler 
+          Role: !Join 
+            - ''
+            - - !Sub 'arn:aws:iam::${AWS::AccountId}:role/av-'
+              - !Select 
+                - 0
+                - !Split 
+                  - '-'
+                  - !Sub '${AWS::StackName}'
+              - '-lambda'
+          Code:
+            ZipFile: |
+              import boto3
+              import json
+              import os
+              emr = boto3.client('emr')
+              cloudwatch = boto3.client('cloudwatch')
+              s3 = boto3.resource('s3')
+              cloudwatchRes = boto3.resource('cloudwatch')
+              metric = cloudwatchRes.Metric('namespace', 'name')
+              paginator = cloudwatch.get_paginator('list_metrics')
+              emr = boto3.client('emr')
+              cloudwatch = boto3.client('cloudwatch')
+              s3 = boto3.resource('s3')                           
+              def handler(event, context):
+                clusterId=event['detail']['clusterId']
+                print(clusterId)
+                nameResponse = emr.describe_cluster(ClusterId=clusterId)
+                clusterName = nameResponse['Cluster']['Name']
+                clusterName=clusterName.split('-')[0]
+                name = clusterName+'-'+clusterId
+                paginator = cloudwatch.get_paginator('describe_alarms')
+                for response in paginator.paginate(AlarmNamePrefix=name):
+                  # Do something with the alarm
+                  print(response['MetricAlarms'])
+                  AlarmName=[]
+                  if response['MetricAlarms']:
+                      for x in response['MetricAlarms']:
+                          AlarmName.append(x['AlarmName'])
+                          if( AlarmName):
+                            print('deleting Alarms')
+                            cloudwatch.delete_alarms(AlarmNames=AlarmName)
+                            cloudwatch.delete_dashboards(DashboardNames=[name])
+                #cloudwatch.delete_alarms(AlarmNames=AlarmName)
+                #cloudwatch.delete_dashboards(DashboardNames=[name])      
+                print(AlarmName)
+                print(name)
+                return(AlarmName) 
+          Runtime: python3.9
+          Timeout: 5
+          TracingConfig:
+            Mode: Active
+    EventBridgeRule:
+        Type: AWS::Events::Rule
+        Properties:
+          Name: !Join ["", [!Ref "AWS::StackName","-eventrule"]] 
+          Description: "emr-state-change-EventRule for Alert CleanUp and cloudwatch dashboard removal"
+          EventPattern: 
+            source: 
+              - 'aws.emr'
+            detail-type: 
+              - 'EMR Cluster State Change'
+            detail: 
+              state:
+                - 'TERMINATED'
+              clusterId: 
+               # - !Join ["", ["{{resolve:ssm:/datasci/",!Ref "AWS::StackName","/EMR/ClusterId}}"]] 
+                - !Join ["", ["{{resolve:ssm:/",!Select [0, !Split ["-", !Ref "AWS::StackName"]],"/",!Ref "AWS::StackName","/EMR/ClusterId}}"]]
+          State: "ENABLED"
+          Targets: 
+            - Arn: !GetAtt LambdaFunctionForEMR.Arn
+              Id: "TargetFunctionV1"
+    PermissionForEventsToInvokeLambda:
+        Type: AWS::Lambda::Permission
+        Properties: 
+          FunctionName: !GetAtt LambdaFunctionForEMR.Arn
+          Action: "lambda:InvokeFunction"
+          Principal: "events.amazonaws.com"
+          SourceArn: !GetAtt EventBridgeRule.Arn

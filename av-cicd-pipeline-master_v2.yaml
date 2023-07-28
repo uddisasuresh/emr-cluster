@@ -1,0 +1,1645 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates CICD services (CodePipeline, CodeBuild, etc.) for a GitHub repository.
+Parameters:
+  ApplicationPrefix:
+    Description: Prefix to identify the team.  (i.e. platform, ca, etc.)
+    Type: String
+  UAI:
+    Description: UAI for product.
+    Type: String
+    Default: uai_missing
+  GitBranch:
+    Description: Branch Name in the Git Repo
+    Type: String
+    Default: main
+    AllowedPattern: "[A-Za-z0-9-_]+"
+    ConstraintDescription: Malformed input-Parameter GitBranch name must only contain lowercase/uppercase letters and numbers
+  KMSKey:
+    Description: Key for the team. Secures their artifacts in S3 Bucket used for CICD.
+    Type: String
+  GitHubURL:
+    Description: HTTPS URL for GitHub Enterprise Repository
+    Type: String
+    AllowedPattern: https:\/\/github.build.ge.com\/[a-zA-Z0-9-_]*\/[a-zA-Z0-9-_]*[^.git]
+    ConstraintDescription: Malformed input-Parameter GitHubURL must be a valid github url (i.e. https://github.build.ge.com/aviation-daas/sam-pipeline-sample). Remember to omit '.git' from the end of your repository name.
+  Runtime:
+    Description: Lambda runtime (nodejs, java8, python3.6, python3.7)
+    Type: String
+    AllowedValues: [nodejs, java8, python3.6, python3.7, ubuntu, amznlinux]
+    Default: ubuntu
+    ConstraintDescription: Parameter 'Runtime' must be one of the following values - nodejs, java8 or python3.6 or python3.7
+  BuildVPC:
+    Description: VPC for which code will be built in.
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-cfc85ea8
+  BuildSubnets:
+    Description: List of subnets for which code will be built in.
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-9ab7a7b0,subnet-b8a5b4e0
+  BuildSecurityGroups:
+    Description: List of Security Groups for which your build will utilize.
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Default: sg-80f47efd
+  BuildSpec:
+    Description: Buildspec file to use for pipeline.
+    Type: String
+    Default: buildspec.yaml
+  Template:
+    Description: Template file name in your repo.
+    Type: String
+    Default: template.yaml
+  ProductionAccount:
+    Description: Account number for Production VPC
+    Type: String
+    Default: "390070096525"
+    MinLength: 12
+    MaxLength: 12
+  TeamDistributionList:
+    Description: Pipeline failure events will be published to an SNS topic.  Enter your teams distribution list which will be subscribed to this topic.
+    Type: String
+    AllowedPattern: ^[a-zA-Z0-9_.+-]+@ge+[.]+com
+    ConstraintDescription: Malformed input-Parameter TeamDistributionList email address must end in "@ge.com".
+  DevConditional:
+    Description: Boolean Value - True if you want a dev environment (dev, stage, prod).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  ProdConditional:
+    Description: Boolean Value - True is you want a prod environment (dev, stage, prod).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  DashBoardDevConditional:
+    Description: Boolean Value - True if you want a dev dashBoard environment (dev, stage, prod).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  DashBoardStageConditional:
+    Description: Boolean Value - True if you want a stage dashboard environment (dev, stage, prod).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  DashBoardProdConditional:
+    Description: Boolean Value - True if you want a prod dashboard environment (dev, stage, prod).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  S3FilesProd:
+    Description: Boolean Value - True is you have files/objects you need to copy to S3 prod.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  S3FilesProdCustomPrefix:
+    Description: The optional custom prefix to be used in S3 transfer.
+    Type: String
+    Default: ""
+  ChangeSets:
+    Description: Boolean Value - True is you would like to use ChangeSets in Stage deployments.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  TemplateConfigFile:
+    Description: Suffix and extension of template configuration file, if provided.
+    Type: String
+    Default: "params.json"
+  TemplateConfig:
+    Description: Boolean Value - True is you are providing a template configuration file.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  PostInstallAction:
+    Description: Boolean Value - True is you would like to run a post-install step (for script execution).
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: false
+  PostInstallCodeArtifact:
+    Description: If a post install action is provided, this is the name of the zipped artifact uploaded during the build.
+    Type: String
+    Default: "deploy.zip"
+  PostInstallBuildSpec:
+    Description: Buildspec file that is invoked in the *post install*, if one was specified. It may be a different build file.
+    Type: String
+    Default: postinstall-buildspec.yaml
+  WebhookLambdaARN:
+    Description: ARN of the lambda function that automates the process of creating the codebuild and github enterprise webhooks.
+    Type: String
+    Default: ""
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Pipeline Details"
+        Parameters:
+          - GitHubURL
+          - GitBranch
+          - TeamDistributionList
+          - ProductionAccount
+      - Label:
+          default: "Build Environment"
+        Parameters:
+          - Runtime
+          - BuildVPC
+          - BuildSubnets
+          - BuildSecurityGroups
+          - DevConditional
+          - ProdConditional
+          - S3FilesProd
+          - S3FilesProdCustomPrefix
+          - ChangeSets
+          - TemplateConfigFile
+          - TemplateConfig
+          - PostInstallAction
+          - DashBoardDevConditional
+          - DashBoardStageConditional
+          - DashBoardProdConditional
+Conditions:
+  DevEnvironment: !Equals [!Ref DevConditional, true]
+  ProdEnvironment: !Equals [!Ref ProdConditional, true]
+  DashBoardDevEnvironment: !Equals [!Ref DashBoardDevConditional, true]
+  DashBoardStageEnvironment: !Equals [!Ref DashBoardStageConditional, true]
+  DashBoardProdEnvironment: !Equals [!Ref DashBoardProdConditional, true]
+  HasSignOffs:
+    !And [
+      !Equals [!Ref DevConditional, true],
+      !Equals [!Ref ProdConditional, true],
+      !Equals [!Ref DashBoardDevConditional, true],
+      !Equals [!Ref DashBoardStageConditional, true],
+      !Equals [!Ref DashBoardProdConditional, true],
+    ]
+  HasS3FilesForProd: !Equals [!Ref S3FilesProd, true]
+  HasS3FilesForProdWithCustomPrefix: !Not [!Equals ["", !Ref S3FilesProdCustomPrefix]]
+  AutomateWebHookCreation: !Not [!Equals ["", !Ref WebhookLambdaARN]]
+  UseChangeSets: !Equals [!Ref ChangeSets, true]
+  UseTemplateConfigFile: !Equals [!Ref TemplateConfig, true]
+  HasPostInstallAction: !Equals [!Ref PostInstallAction, true]
+Mappings:
+  ImageMap:
+    nodejs:
+      Image: aws/codebuild/nodejs:8.11.0
+    java8:
+      Image: aws/codebuild/java:openjdk-8
+    python3.6:
+      Image: aws/codebuild/python:3.6.5
+    python3.7:
+      Image: aws/codebuild/python:3.7.1
+    ubuntu:
+      Image: aws/codebuild/standard:4.0
+    amznlinux:
+      Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      ImageAarch64:  aws/codebuild/amazonlinux2-aarch64-standard:2.0      
+Resources:
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Join ["-", [!Sub "${AWS::StackName}", "build-project"]]
+      Description: Codebuild project that builds, validates, tests and packages lambda function for CI/CD pipeline.
+      SourceVersion: !Ref GitBranch
+      Tags:
+        - Key: uai
+          Value: !Ref UAI
+      ServiceRole:
+        !Join [
+          "",
+          [
+            "arn:aws:iam::",
+            !Ref "AWS::AccountId",
+            ":role/av-",
+            !Sub "${ApplicationPrefix}",
+            "-codebuild",
+          ],
+        ]
+      EncryptionKey: !Ref KMSKey
+      Source:
+        Type: GITHUB_ENTERPRISE
+        Location: !Ref GitHubURL
+        GitCloneDepth: 1
+        ReportBuildStatus: true
+        BuildSpec: !Ref BuildSpec
+      Artifacts:
+        Type: NO_ARTIFACTS
+      VpcConfig:
+        SecurityGroupIds: !Ref BuildSecurityGroups
+        Subnets: !Ref BuildSubnets
+        VpcId: !Ref BuildVPC
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !FindInMap [ImageMap, !Ref Runtime, Image]
+        Certificate: "arn:aws:s3:::med-av-daas-preprod-cicd/shared/certs/github/cert.pem"
+        EnvironmentVariables:
+          - Name: PIPELINE_NAME
+            Value: !Sub "${AWS::StackName}"
+          - Name: BUCKET
+            Value: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+          - Name: APP_PREFIX
+            Value: !Ref ApplicationPrefix
+          - Name: S3_PREFIX
+            Value: !Join ["", [!Sub "${AWS::StackName}", "/artifacts"]]
+          - Name: KEY_ID
+            Value: !Select [1, !Split ["/", !Ref KMSKey]]
+          - Name: TEMPLATE
+            Value: !Ref Template
+          - Name: BRANCH_NAME
+            Value: !Ref GitBranch
+      TimeoutInMinutes: 10
+
+  BuildProjectPostInstall:
+    Type: AWS::CodeBuild::Project
+    Condition: HasPostInstallAction
+    Properties:
+      Name: !Join ["-", [!Sub "${AWS::StackName}", "post-install"]]
+      Description: Codebuild project that executes script actions in this CI/CD pipeline.
+      Tags:
+        - Key: uai
+          Value: !Ref UAI
+      ServiceRole:
+        !Join [
+          "",
+          [
+            "arn:aws:iam::",
+            !Ref "AWS::AccountId",
+            ":role/av-",
+            !Sub "${ApplicationPrefix}",
+            "-codebuild",
+          ],
+        ]
+      EncryptionKey: !Ref KMSKey
+      Source:
+        Type: S3
+        Location:
+          !Join [
+            "",
+            [
+              !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd",
+              "/",
+              !Sub "${AWS::StackName}",
+              "/",
+              !Ref PostInstallCodeArtifact,
+            ],
+          ]
+        BuildSpec: !Ref PostInstallBuildSpec
+      Artifacts:
+        Type: NO_ARTIFACTS
+      VpcConfig:
+        SecurityGroupIds: !Ref BuildSecurityGroups
+        Subnets: !Ref BuildSubnets
+        VpcId: !Ref BuildVPC
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !FindInMap [ImageMap, !Ref Runtime, Image]
+      TimeoutInMinutes: 10
+
+  AppPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Join ["-", [!Sub "${AWS::StackName}", "cicd-pipeline"]]
+      RoleArn:
+        !Join [
+          "",
+          [
+            "arn:aws:iam::",
+            !Ref "AWS::AccountId",
+            ":role/av-",
+            !Sub "${ApplicationPrefix}",
+            "-codepipeline",
+          ],
+        ]
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Unversioned-Build-Artifact
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              Configuration:
+                S3Bucket: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                S3ObjectKey:
+                  !Join ["", [!Sub "${AWS::StackName}", "/internal.zip"]]
+              OutputArtifacts:
+                - Name: internal
+              RunOrder: 1
+            - Name: Versioned-Build-Artifact
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              Configuration:
+                S3Bucket: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                S3ObjectKey:
+                  !Join ["", [!Sub "${AWS::StackName}", "/versioned.zip"]]
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: versions
+              RunOrder: 2
+
+        ###########    DEV DEPLOYMENT SECTION  - OPTIONAL   ###########
+
+        - !If
+          - DevEnvironment
+          - !If
+            - UseChangeSets
+            - Name: Dev-Deploy-CS #This version of Dev-Deploy uses Changesets so developers can review before executing.
+              Actions:
+                - Name: CreateDev-Changeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: CloudFormation
+                    Version: "1"
+                  InputArtifacts:
+                    - Name: internal
+                  Configuration:
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "dev"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}", "dev"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}", ".yaml"],
+                      ]
+                    TemplateConfiguration:
+                      !If [
+                        UseTemplateConfigFile,
+                        !Join [
+                          "",
+                          [
+                            "internal::",
+                            !Sub "${AWS::StackName}",
+                            "-",
+                            !Ref TemplateConfigFile,
+                          ],
+                        ],
+                        !Ref "AWS::NoValue",
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "dev"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RunOrder: 1
+                - Name: ReviewDev-Changeset
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                    CustomData: Please find your stack, click on "Change sets", then verify the changes to deploy.
+                  RunOrder: 2
+                - Name: Dev-Deploy-ExecuteChangeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "dev"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}", "dev"]]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 3
+
+            - Name: Dev-Deploy
+              Actions:
+                - Name: Dev-Deploy
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "dev"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}", ".yaml"],
+                      ]
+                    TemplateConfiguration:
+                      !If [
+                        UseTemplateConfigFile,
+                        !Join [
+                          "",
+                          [
+                            "internal::",
+                            !Sub "${AWS::StackName}",
+                            "-",
+                            !Ref TemplateConfigFile,
+                          ],
+                        ],
+                        !Ref "AWS::NoValue",
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "dev"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 1
+
+                - !If
+                  - HasPostInstallAction
+                  - Name: Dev-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"dev"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 4
+                  - !Ref AWS::NoValue
+
+                - Name: Dev-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 5
+
+          - !Ref AWS::NoValue
+
+        ###########    DEV DashBoard DEPLOYMENT SECTION  - OPTIONAL   ###########
+        - !If
+          - DashBoardDevEnvironment
+          - !If
+            - UseChangeSets
+            - Name: Dev-DashBoard-Deploy-CS #This version of DashBoard-Dev-Deploy uses Changesets so developers can review before executing.
+              Actions:
+                - Name: Create-Dev-DashBoard-Changeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: CloudFormation
+                    Version: "1"
+                  InputArtifacts:
+                    - Name: internal
+                  Configuration:
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "dev","dashBoard"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}","dev", "dashBoard"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}","_dashBoard", ".yaml"],
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "dev"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RunOrder: 1
+                - Name: ReviewDev-Changeset
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                    CustomData: Please find your stack, click on "Change sets", then verify the changes to deploy.
+                  RunOrder: 2
+                - Name: Dev-DashBoard-Deploy-ExecuteChangeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "dev","dashBoard"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}","dev","dashBoard"]]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 3
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/devDashBoard"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 4
+                - Name: Dev-DashBoard-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 5
+
+            - Name: Dev-DashBoard-Deploy
+              Actions:
+                - Name: Dev-DashBoard-Deploy
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}","dev","dashBoard"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}", "_dashBoard", ".yaml"],
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "dev"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 1
+
+                - !If
+                  - HasPostInstallAction
+                  - Name: Dev-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"dev"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 4
+                  - !Ref AWS::NoValue
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/devDashBoard"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 5
+
+                - Name: Dev-DashBoard-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 6
+
+          - !Ref AWS::NoValue
+
+        ###########    STAGE DEPLOYMENT SECTION  - REQUIRED  ###########
+
+        - !If
+          - UseChangeSets
+          - Name: Stage-Deploy-CS #This version of Stage-Deploy uses Changesets so developers can review before executing.
+            Actions:
+              - Name: CreateStage-Changeset
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: CloudFormation
+                  Version: "1"
+                InputArtifacts:
+                  - Name: internal
+                Configuration:
+                  ActionMode: CHANGE_SET_REPLACE
+                  RoleArn:
+                    !Join [
+                      "",
+                      [
+                        "arn:aws:iam::",
+                        !Ref "AWS::AccountId",
+                        ":role/av-",
+                        !Sub "${ApplicationPrefix}",
+                        "-cloudformation-deployer",
+                      ],
+                    ]
+                  StackName: !Join ["-", [!Sub "${AWS::StackName}", "stage"]]
+                  ChangeSetName:
+                    !Join ["-", [!Sub "${AWS::StackName}", "stage"]]
+                  TemplatePath:
+                    !Join [
+                      "",
+                      ["internal::", !Sub "${AWS::StackName}", ".yaml"],
+                    ]
+                  TemplateConfiguration:
+                    !If [
+                      UseTemplateConfigFile,
+                      !Join [
+                        "",
+                        [
+                          "internal::",
+                          !Sub "${AWS::StackName}",
+                          "-",
+                          !Ref TemplateConfigFile,
+                        ],
+                      ],
+                      !Ref "AWS::NoValue",
+                    ]
+                  Capabilities: CAPABILITY_AUTO_EXPAND
+                  ParameterOverrides: !Join ["",["{",'"StageName": "stage"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                RunOrder: 1
+              - Name: ReviewStage-Changeset
+                ActionTypeId:
+                  Category: Approval
+                  Owner: AWS
+                  Provider: Manual
+                  Version: "1"
+                Configuration:
+                  NotificationArn: !Ref PipelineTopic
+                  ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                  CustomData: Please find your stack, click on "Change sets", then verify the changes to deploy.
+                RunOrder: 2
+              - Name: Stage-Deploy-ExecuteChangeset
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                Configuration:
+                  ActionMode: CHANGE_SET_EXECUTE
+                  RoleArn:
+                    !Join [
+                      "",
+                      [
+                        "arn:aws:iam::",
+                        !Ref "AWS::AccountId",
+                        ":role/av-",
+                        !Sub "${ApplicationPrefix}",
+                        "-cloudformation-deployer",
+                      ],
+                    ]
+                  StackName: !Join ["-", [!Sub "${AWS::StackName}", "stage"]]
+                  ChangeSetName:
+                    !Join ["-", [!Sub "${AWS::StackName}", "stage"]]
+                  Capabilities: CAPABILITY_AUTO_EXPAND
+                InputArtifacts:
+                  - Name: internal
+                RunOrder: 3
+
+              - !If
+                - HasPostInstallAction
+                - Name: Stage-PostInstallAction
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CodeBuild
+                  Configuration:
+                    ProjectName:
+                      Ref: BuildProjectPostInstall
+                    EnvironmentVariables:
+                      !Join ["", ['[{"name":"ENV","value":"stage"}]']]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 4
+                - !Ref AWS::NoValue
+
+              - Name: Promote-Artifact
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: S3
+                  Version: "1"
+                Configuration:
+                  BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                  ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/stage"]]
+                  Extract: true
+                InputArtifacts:
+                  - Name: versions
+                RunOrder: 5
+              - !If
+                - ProdEnvironment
+                - Name: Stage-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 6
+                - !Ref AWS::NoValue
+                
+
+          - Name: Stage-Deploy #This version of Stage-Deploy simply executes an update to the stack.
+            Actions:
+              - Name: Stage-Deploy
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Version: "1"
+                  Provider: CloudFormation
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  RoleArn:
+                    !Join [
+                      "",
+                      [
+                        "arn:aws:iam::",
+                        !Ref "AWS::AccountId",
+                        ":role/av-",
+                        !Sub "${ApplicationPrefix}",
+                        "-cloudformation-deployer",
+                      ],
+                    ]
+                  StackName: !Join ["-", [!Sub "${AWS::StackName}", "stage"]]
+                  TemplatePath:
+                    !Join [
+                      "",
+                      ["internal::", !Sub "${AWS::StackName}", ".yaml"],
+                    ]
+                  TemplateConfiguration:
+                    !If [
+                      UseTemplateConfigFile,
+                      !Join [
+                        "",
+                        [
+                          "internal::",
+                          !Sub "${AWS::StackName}",
+                          "-",
+                          !Ref TemplateConfigFile,
+                        ],
+                      ],
+                      !Ref "AWS::NoValue",
+                    ]
+                  Capabilities: CAPABILITY_AUTO_EXPAND
+                  ParameterOverrides: !Join ["",["{",'"StageName": "stage"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                InputArtifacts:
+                  - Name: internal
+                RunOrder: 1
+
+              - !If
+                - HasPostInstallAction
+                - Name: Stage-PostInstallAction
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CodeBuild
+                  Configuration:
+                    ProjectName:
+                      Ref: BuildProjectPostInstall
+                    EnvironmentVariables:
+                      !Join ["", ['[{"name":"ENV","value":"stage"}]']]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 2
+                - !Ref AWS::NoValue
+
+              - Name: Promote-Artifact
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: S3
+                  Version: "1"
+                Configuration:
+                  BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                  ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/stage"]]
+                  Extract: true
+                InputArtifacts:
+                  - Name: versions
+                RunOrder: 3
+              - !If
+                - ProdEnvironment
+                - Name: Stage-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 4
+                - !Ref AWS::NoValue
+
+        ################ Stage DashBoard DEPLOYMENT SECTION - REQUIRED ####################
+        - !If
+          - DashBoardStageEnvironment
+          - !If
+            - UseChangeSets
+            - Name: Stage-DashBoard-Deploy-CS #This version of Stage-DashBoard-Deploy-CS uses Changesets so developers can review before executing.
+              Actions:
+                - Name: Create-Stage-DashBoard-Changeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: CloudFormation
+                    Version: "1"
+                  InputArtifacts:
+                    - Name: internal
+                  Configuration:
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}","stage","dashBoard"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}","stage","dashBoard"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}","_dashBoard", ".yaml"],
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "stage"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RunOrder: 1
+                - Name: ReviewDev-Changeset
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                    CustomData: Please find your stack, click on "Change sets", then verify the changes to deploy.
+                  RunOrder: 2
+                - Name: Stage-DashBoard-Deploy-ExecuteChangeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}","stage","dashBoard"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}","stage","dashBoard"]]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 3
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/stageDashBoard"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 4
+                - Name: Stage-DashBoard-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 5
+                
+
+            - Name: Stage-DashBoard-Deploy
+              Actions:
+                - Name: Stage-DashBoard-Deploy
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn:
+                      !Join [
+                        "",
+                        [
+                          "arn:aws:iam::",
+                          !Ref "AWS::AccountId",
+                          ":role/av-",
+                          !Sub "${ApplicationPrefix}",
+                          "-cloudformation-deployer",
+                        ],
+                      ]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}","stage","dashBoard"]]
+                    TemplatePath:
+                      !Join [
+                        "",
+                        ["internal::", !Sub "${AWS::StackName}", "_dashBoard", ".yaml"],
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "stage"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 1
+
+                - !If
+                  - HasPostInstallAction
+                  - Name: Stage-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"stage"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 4
+                  - !Ref AWS::NoValue
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/stageDashBoard"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 5
+
+                - Name: Stage-DashBoard-Sign-Off
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}
+                    CustomData: Please review changeset
+                  RunOrder: 6
+
+          - !Ref AWS::NoValue
+
+        ###########    PROD DEPLOYMENT SECTION  - OPTIONAL   ###########
+
+        - !If
+          - ProdEnvironment
+
+          - !If
+            - UseChangeSets
+            - Name: Prod-Deploy-CS #This version of Prod-Deploy uses Changesets so developers can review before executing.
+              Actions:
+                - !If
+                  - HasS3FilesForProd
+                  - Name: S3-Transfer-Files
+                    ActionTypeId:
+                      Category: Invoke
+                      Owner: AWS
+                      Version: "1"
+                      Provider: Lambda
+                    Configuration:
+                      FunctionName: !Sub "${ApplicationPrefix}-cicd-s3transfer"
+                      UserParameters:
+                        Fn::Sub:
+                          - '{ "SourceBucketName": "${PreProdTeamCICDS3Bucket}", "S3PrefixLoc": "${S3_PREFIX}", "TargetBucketName": "${ProdTeamCICDS3Bucket}"}'
+                          - PreProdTeamCICDS3Bucket: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                            ProdTeamCICDS3Bucket: !Sub "med-av-daas-prod-${ApplicationPrefix}-cicd"
+                            S3_PREFIX: !If [HasS3FilesForProdWithCustomPrefix, !Ref S3FilesProdCustomPrefix, !Join ["",[!Sub "${AWS::StackName}", "/artifacts"]]]
+                    Region: !Sub ${AWS::Region}
+                    RunOrder: 1
+                  - !Ref AWS::NoValue
+
+                - Name: CreateProd-Changeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: CloudFormation
+                    Version: "1"
+                  InputArtifacts:
+                    - Name: internal
+                  Configuration:
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",]]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod"]]
+                    ChangeSetName: !Join ["-", [!Sub "${AWS::StackName}", "prod"]]
+                    TemplatePath: !Join ["",["internal::", !Sub "${AWS::StackName}", ".yaml"],]
+                    TemplateConfiguration:
+                      !If [
+                        UseTemplateConfigFile,
+                        !Join ["",["internal::",!Sub "${AWS::StackName}","-",!Ref TemplateConfigFile,]],
+                        !Ref "AWS::NoValue",
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "prod"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RoleArn:
+                    !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-codepipeline-cloudformation",],]
+                  RunOrder: 2
+                - Name: ReviewProd-Changeset
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                    CustomData: In the *Production VPC*, please find your stack, click on "Change sets", then verify the changes to deploy.
+                  RunOrder: 3
+                - Name: Prod-Deploy-ExecuteChangeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",],]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}", "prod"]]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                  InputArtifacts:
+                    - Name: internal
+                  RoleArn:
+                    !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-codepipeline-cloudformation",],]
+                  RunOrder: 4
+                - Name: Promote-Stage-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/prod"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 5
+                - !If
+                  - HasPostInstallAction
+                  - Name: Prod-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"prod"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 6
+                  - !Ref AWS::NoValue
+
+            - Name: Prod-Deploy
+              Actions:
+                - !If
+                  - HasS3FilesForProd
+                  - Name: S3-Transfer-Files
+                    ActionTypeId:
+                      Category: Invoke
+                      Owner: AWS
+                      Version: "1"
+                      Provider: Lambda
+                    Configuration:
+                      FunctionName: !Sub "${ApplicationPrefix}-cicd-s3transfer"
+                      UserParameters:
+                        Fn::Sub:
+                          - '{ "SourceBucketName": "${PreProdTeamCICDS3Bucket}", "S3PrefixLoc": "${S3_PREFIX}", "TargetBucketName": "${ProdTeamCICDS3Bucket}"}'
+                          - PreProdTeamCICDS3Bucket: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                            ProdTeamCICDS3Bucket: !Sub "med-av-daas-prod-${ApplicationPrefix}-cicd"
+                            S3_PREFIX: !If [HasS3FilesForProdWithCustomPrefix, !Ref S3FilesProdCustomPrefix, !Join ["",[!Sub "${AWS::StackName}", "/artifacts"]]]
+                    Region: !Sub ${AWS::Region}
+                    RunOrder: 1
+                  - !Ref AWS::NoValue
+
+                - Name: Prod-Deploy #Not using ChangeSets. Just update the stack.
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",],]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod"]]
+                    TemplatePath:
+                      !Join ["",["internal::", !Sub "${AWS::StackName}", ".yaml"],]
+                    TemplateConfiguration:
+                      !If [
+                        UseTemplateConfigFile,
+                        !Join ["",["internal::",!Sub "${AWS::StackName}","-",!Ref TemplateConfigFile,],],
+                        !Ref "AWS::NoValue",
+                      ]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "prod"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RoleArn:
+                    !Join ["",[ "arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}", "-nonprod-codepipeline-cloudformation",],]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 2
+                - Name: Promote-Stage-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/prod"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 3
+
+                - !If
+                  - HasPostInstallAction
+                  - Name: Prod-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"prod"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 4
+                  - !Ref AWS::NoValue
+
+          - !Ref AWS::NoValue
+        ################ Prod DashBoard  DEPLOYMENT SECTION  - OPTIONAL  #################
+        - !If
+          - DashBoardProdEnvironment
+
+          - !If
+            - UseChangeSets
+            - Name: Prod-DashBoard-Deploy-CS #This version of Prod-Deploy uses Changesets so developers can review before executing.
+              Actions:
+                - Name: CreateProd-DashBoard-Changeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: CloudFormation
+                    Version: "1"
+                  InputArtifacts:
+                    - Name: internal
+                  Configuration:
+                    ActionMode: CHANGE_SET_REPLACE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",]]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod","dashBoard"]]
+                    ChangeSetName: !Join ["-", [!Sub "${AWS::StackName}", "prod","dashBoard"]]
+                    TemplatePath: !Join ["",["internal::", !Sub "${AWS::StackName}", "_dashBoard.yaml"],]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "prod"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RoleArn:
+                    !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-codepipeline-cloudformation",],]
+                  RunOrder: 2
+                - Name: ReviewProd-DashBoard-Changeset
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Provider: Manual
+                    Version: "1"
+                  Configuration:
+                    NotificationArn: !Ref PipelineTopic
+                    ExternalEntityLink: !Sub https://console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/
+                    CustomData: In the *Production VPC*, please find your stack, click on "Change sets", then verify the changes to deploy.
+                  RunOrder: 3
+                - Name: Prod-DashBoard-Deploy-ExecuteChangeset
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CHANGE_SET_EXECUTE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",],]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod","dashBoard"]]
+                    ChangeSetName:
+                      !Join ["-", [!Sub "${AWS::StackName}", "prod","dashBoard"]]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                  InputArtifacts:
+                    - Name: internal
+                  RoleArn:
+                    !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-codepipeline-cloudformation",],]
+                  RunOrder: 4
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/prod"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 5
+                - !If
+                  - HasPostInstallAction
+                  - Name: Prod-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"prod"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 6
+                  - !Ref AWS::NoValue
+
+            - Name: Prod-DashBoard-Deploy
+              Actions:
+                - Name: Prod-DashBoard-Deploy #Not using ChangeSets. Just update the stack.
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Version: "1"
+                    Provider: CloudFormation
+                  Configuration:
+                    ActionMode: CREATE_UPDATE
+                    RoleArn:
+                      !Join ["",["arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}","-nonprod-cloudformation-deployer",],]
+                    StackName: !Join ["-", [!Sub "${AWS::StackName}", "prod","dashBoard"]]
+                    TemplatePath:
+                      !Join ["",["internal::", !Sub "${AWS::StackName}", "_dashBoard.yaml"],]
+                    Capabilities: CAPABILITY_AUTO_EXPAND
+                    ParameterOverrides: !Join ["",["{",'"StageName": "prod"',"," ," ",'"ApplicationPrefix": ','"',!Ref ApplicationPrefix,'"}']]
+                  RoleArn:
+                    !Join ["",[ "arn:aws:iam::",!Ref ProductionAccount,":role/av-",!Sub "${ApplicationPrefix}", "-nonprod-codepipeline-cloudformation",],]
+                  InputArtifacts:
+                    - Name: internal
+                  RunOrder: 2
+                - Name: Promote-Artifact
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: S3
+                    Version: "1"
+                  Configuration:
+                    BucketName: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+                    ObjectKey: !Join ["", [!Sub "${AWS::StackName}", "/prod"]]
+                    Extract: true
+                  InputArtifacts:
+                    - Name: versions
+                  RunOrder: 3
+
+                - !If
+                  - HasPostInstallAction
+                  - Name: Prod-PostInstallAction
+                    ActionTypeId:
+                      Category: Build
+                      Owner: AWS
+                      Version: "1"
+                      Provider: CodeBuild
+                    Configuration:
+                      ProjectName:
+                        Ref: BuildProjectPostInstall
+                      EnvironmentVariables:
+                        !Join ["", ['[{"name":"ENV","value":"prod"}]']]
+                    InputArtifacts:
+                      - Name: internal
+                    RunOrder: 4
+                  - !Ref AWS::NoValue
+
+          - !Ref AWS::NoValue
+
+      ArtifactStore:
+        Type: S3
+        Location: !Sub "med-av-daas-preprod-${ApplicationPrefix}-cicd"
+        EncryptionKey:
+          Id: !Ref KMSKey
+          Type: KMS
+      Tags:
+        - Key: uai
+          Value: !Ref UAI
+  WebHooks:
+    Condition: AutomateWebHookCreation
+    DependsOn: BuildProject
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      logLevel: debug
+      ServiceToken: !Ref WebhookLambdaARN
+      GitHubURL: !Ref GitHubURL
+      BranchName: !Ref GitBranch
+      BuildProjectName: !Ref BuildProject
+  PipelineTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName:
+        !Join [" ", [!Sub "${AWS::StackName}", "Pipeline Notification"]]
+      Tags:
+        - Key: uai
+          Value: !Ref UAI
+      Subscription:
+        - Endpoint: !Ref TeamDistributionList
+          Protocol: email
+      TopicName: !Join ["-", [!Sub "${AWS::StackName}", "cicd-pipeline"]]
+  PipelineTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Id: CloudWatchEvent
+        Version: 2012-10-17
+        Statement:
+          - Sid: Allows CloudWatch Events to interact with SNS topic
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: "sns:Publish"
+            Resource: !Ref PipelineTopic
+      Topics:
+        - !Ref PipelineTopic
+  PipelineFailureEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description:
+        !Join [
+          " ",
+          [
+            "Event to monitor",
+            !Sub "${AWS::StackName}",
+            "for execution failures",
+          ],
+        ]
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - CodePipeline Action Execution State Change
+        detail:
+          state:
+            - FAILED
+          pipeline:
+            - !Join ["-", [!Sub "${AWS::StackName}", "cicd-pipeline"]]
+          action:
+            - Unversioned-Build-Artifact
+            - Versioned-Build-Artifact
+            - !If [DevEnvironment, Dev-Deploy, !Ref "AWS::NoValue"]
+            - Stage-Deploy
+            - Promote-Artifact
+            - !If [ProdEnvironment, Prod-Deploy, !Ref "AWS::NoValue"]
+            - !If [ProdEnvironment, Promote-Stage-Artifact, !Ref "AWS::NoValue"]
+      Name: !Join ["-", [!Sub "${AWS::StackName}", "monitor-failures"]]
+      State: ENABLED
+      Targets:
+        - Id: !Join ["-", [!Sub "${AWS::StackName}", "failure-event"]]
+          Arn: !Ref PipelineTopic
+          InputTransformer:
+            InputPathsMap:
+              pipeline: $.detail.pipeline
+              execution-id: $.detail.execution-id
+              action: $.detail.action
+              state: $.detail.state
+              time: $.time
+              account: $.account
+            InputTemplate: |
+              "The Pipeline <pipeline> has failed to execute properly."
+
+              "Account: <account>." 
+              "Time: <time> UTC." 
+              "Pipeline Name: <pipeline>."
+              "Pipeline Execution Id: <execution-id>." 
+              "Pipeline Action: <action>." 
+              "State: <state>."
+  PipelineSignOffEvent:
+    Condition: HasSignOffs
+    Type: AWS::Events::Rule
+    Properties:
+      Description:
+        !Join [
+          " ",
+          ["Event to monitor", !Sub "${AWS::StackName}", "sign off events"],
+        ]
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - CodePipeline Action Execution State Change
+        detail:
+          state:
+            - SUCCEEDED
+          pipeline:
+            - !Join ["-", [!Sub "${AWS::StackName}", "cicd-pipeline"]]
+          action:
+            - !If [DevEnvironment, Dev-Sign-Off, !Ref "AWS::NoValue"]
+            - !If [ProdEnvironment, Stage-Sign-Off, !Ref "AWS::NoValue"]
+      Name:
+        !Join ["-", [!Sub "${AWS::StackName}", "monitor-environment-sign-off"]]
+      State: ENABLED
+      Targets:
+        - Id: !Join ["-", [!Sub "${AWS::StackName}", "sign-off-event"]]
+          Arn: !Ref PipelineTopic
+          InputTransformer:
+            InputPathsMap:
+              pipeline: $.detail.pipeline
+              execution-id: $.detail.execution-id
+              action: $.detail.action
+              state: $.detail.state
+              time: $.time
+              account: $.account
+            InputTemplate: |
+              "<action> approved!  Beginning deployment to next environment."
+
+              "Account: <account>." 
+              "Time: <time> UTC."
+              "Pipeline Name: <pipeline>." 
+              "Pipeline Execution Id: <execution-id>." 
+              "Pipeline Action: <action>." 
+              "State: <state>."
+  BuildProjectFailureEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: !Sub Event to monitor ${BuildProject} failure events
+      EventPattern:
+        source:
+          - aws.codebuild
+        detail-type:
+          - CodeBuild Build State Change
+        detail:
+          build-status:
+            - FAILED
+          project-name:
+            - !Ref BuildProject
+      Name: !Join ["-", [!Sub "${AWS::StackName}", "monitor-build-failures"]]
+      State: ENABLED
+      Targets:
+        - Id: !Join ["-", [!Sub "${AWS::StackName}", "failure-event"]]
+          Arn: !Ref PipelineTopic
+          InputTransformer:
+            InputPathsMap:
+              project-name: $.detail.project-name
+              build-id: $.detail.build-id
+              build-status: $.detail.build-status
+              time: $.time
+              account: $.account
+            InputTemplate: |
+              "The Pull Request Validation job <project-name> has failed to execute properly.  Interactions with the associated pipeline will be affected. Please look into why this job failed by analyzing the logs."
+
+              "Account: <account>." 
+              "Time: <time> UTC." 
+              "Build Id: <build-id>." 
+              "CodeBuild Project Name: <project-name>." 
+              "Build Status: <build-status>."
+Outputs:
+  CodePipelineName:
+    Description: Name of CodePipeline pipeline
+    Value: !Ref AppPipeline
+  CodeBuildName:
+    Description: Name of CodeBuild project that builds, tests, lints, scans and packages your code on PR and push events
+    Value: !Ref BuildProject
+  PipelineSNSTopic:
+    Description: Name of SNS topic associated with pipeline.  Pipeline failures notifications will be sent to this topic.
+    Value: !GetAtt [PipelineTopic, TopicName]

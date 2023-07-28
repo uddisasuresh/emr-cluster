@@ -1,0 +1,126 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Creates EMR cluster using DOS CI/CD.
+Parameters:
+  StageName:
+    Type: String
+    Default: stage
+    AllowedValues: [dev, stage, prod]
+  ClusterName:
+    Type: String
+  InstanceType:
+    Type: String
+  ReleaseLabel:
+    Type: String
+  TerminationProtected:
+    Type: String
+    Default: 'false'
+  SecurityConfiguration:
+    Type: String
+  JobFlowRole:
+    Type: String
+  ServiceRole:
+    Type: String
+  AutoScalingRole:
+    Type: String
+  MasterInstanceCount:
+    Type: Number
+    Default: 1
+  CoreInstanceCount:
+    Type: Number
+    Default: 1
+  EbsSizeInGB:
+    Type: Number
+    Default: 100
+  EbsVolumeType:
+    Type: String
+    Default: gp2   
+  EbsVolumesPerInstance:
+    Type: Number
+    Default: 2
+  EbsOptimized:
+    Type: String
+    Default: 'false'
+  # S3LogsBucketBasePath:
+  #   Description: Bucket to log EMR actions
+  #   Type: String
+  TeamDistributionList:
+    Description: Used to subscribe to the SNS Topic that may be used for stack notifications
+    Type: String
+  MappingsPath:
+    Description: Path for team mappings (cicd buckets, etc.) Included in AWS Transform below.
+    Type: String
+  AdditionalEMRPropertiesPath:
+    Description: Path for EMR Properties (Bootstrap Actions,Applications,etc.) Included in AWS Transform below.
+    Type: String
+  AdditionalEMRResourcesPath:
+    Description: Path for additional EMR resources a team might have(Steps, InstanceGroupConfig, etc.). Included in AWS Transform below.
+    Type: String
+
+#This is a mappings file for team-based buckets, etc.
+Mappings:
+  'Fn::Transform':
+    Name: 'AWS::Include'
+    Parameters:
+      Location: !Ref MappingsPath
+
+Resources:
+
+  EMRCluster:
+    Type: AWS::EMR::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      SecurityConfiguration: !Ref SecurityConfiguration
+      Instances:
+        MasterInstanceGroup:
+          InstanceCount: !Ref MasterInstanceCount
+          InstanceType: !Ref InstanceType
+          Market: ON_DEMAND
+          Name: master
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+            - VolumeSpecification:
+                SizeInGB: !Ref EbsSizeInGB
+                VolumeType: !Ref EbsVolumeType
+              VolumesPerInstance: !Ref EbsVolumesPerInstance
+            EbsOptimized: !Ref EbsOptimized
+        CoreInstanceGroup:
+          InstanceCount: !Ref CoreInstanceCount
+          InstanceType: !Ref InstanceType
+          Market: ON_DEMAND
+          Name: core
+          EbsConfiguration:
+            EbsBlockDeviceConfigs:
+            - VolumeSpecification:
+                SizeInGB: !Ref EbsSizeInGB
+                VolumeType: !Ref EbsVolumeType
+              VolumesPerInstance: !Ref EbsVolumesPerInstance
+            EbsOptimized: !Ref EbsOptimized
+        TerminationProtected: !Ref TerminationProtected
+        Ec2KeyName: '{{resolve:ssm:/cicd/ec2-key-pair-name:1}}'
+        Ec2SubnetId: '{{resolve:ssm:/cicd/internal-subnet-2:1}}'
+        EmrManagedMasterSecurityGroup: '{{resolve:ssm:/cicd/security-group-emr-master:1}}'
+        EmrManagedSlaveSecurityGroup: '{{resolve:ssm:/cicd/security-group-emr-slave:1}}'
+        ServiceAccessSecurityGroup: '{{resolve:ssm:/cicd/security-group-emr-service-access:1}}'
+        AdditionalMasterSecurityGroups: !Split [",", '{{resolve:ssm:/cicd/security-group-emr-additional-master:1}}']
+        AdditionalSlaveSecurityGroups: !Split [",", '{{resolve:ssm:/cicd/security-group-emr-additional-slave:1}}']  
+      JobFlowRole: !Ref JobFlowRole
+      ServiceRole: !Ref ServiceRole
+      AutoScalingRole: !Ref AutoScalingRole 
+      ReleaseLabel: !Ref ReleaseLabel
+      VisibleToAllUsers: true
+      LogUri:
+          Fn::Sub:
+            - "s3://${bucket}/emr/emr-log/"
+            - bucket: !FindInMap [CicdBuckets, !Ref StageName, bucket]
+
+      'Fn::Transform':
+        Name: 'AWS::Include'
+        Parameters:
+          Location: !Ref AdditionalEMRPropertiesPath
+
+  'Fn::Transform':
+    Name: 'AWS::Include'
+    Parameters:
+      Location: !Ref AdditionalEMRResourcesPath

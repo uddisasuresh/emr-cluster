@@ -1,0 +1,74 @@
+version: 0.2
+phases:
+
+  install:
+    runtime-versions:
+      python: 3.7 
+    commands: 
+    
+      - echo WebHook Event = $CODEBUILD_WEBHOOK_EVENT 
+      - SOURCE_VERSION=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+
+      - pip3 install yamllint
+      
+  pre_build:
+    commands:
+      
+      - pip install -r requirements.txt
+ 
+  build:
+    commands:
+
+      - if [ -z "$TEMPLATE" ]; then echo "Setting default template name value..."; $TEMPLATE="template.yaml"; fi
+      - echo "Template file name to be used in build -> $TEMPLATE"
+
+      # Validate SAM template. If using SAM, keep this.
+      - pwd
+      - ls -ltrh
+      - sam validate --template $TEMPLATE
+
+      # EMR is not a serverless service. However, doing this allows us to mix Step, Lambda, etc. in the same template later. 
+      - sam build -t $TEMPLATE
+      - sam package --output-template-file ${PIPELINE_NAME}.yaml --s3-bucket $BUCKET --s3-prefix $S3_PREFIX
+      
+      # Validate SAM template of cwd_template.yaml . If using SAM, keep this.
+      - sam validate --template cwd_template.yaml
+      - sam build -t cwd_template.yaml
+      - sam package --output-template-file ${PIPELINE_NAME}_dashBoard.yaml --s3-bucket $BUCKET --s3-prefix $S3_PREFIX
+
+      - echo "sending bootstrap files to s3"
+      - aws s3 sync bootstrap/${APP_PREFIX}/ s3://med-av-daas-preprod-${APP_PREFIX}-cicd/emr/bootstrap/
+      
+      - aws s3 sync ${APP_PREFIX}/ s3://med-av-daas-preprod-${APP_PREFIX}-cicd/emr/config/${PIPELINE_NAME}-stage/
+      - aws s3 sync ${APP_PREFIX}/ s3://med-av-daas-preprod-${APP_PREFIX}-cicd/emr/config/${PIPELINE_NAME}-prod/
+      - cd ${APP_PREFIX}
+      - configs=`ls *.json`
+      - for config in $configs;
+          do
+            cp $config ${PIPELINE_NAME}-$config;
+            cp $config ${PIPELINE_NAME}-${SOURCE_VERSION}-$config;
+            cp *.json ../;
+          done
+      - cd ..   
+      - echo "Template and config files renamed for packaging and sending to S3."
+      - ls -ltrh
+      # Zip up the template AND any configuration files we retrieved from S3. Make a 'versioned' copy as well.
+      - cp ${PIPELINE_NAME}.yaml ${PIPELINE_NAME}-${SOURCE_VERSION}.yaml
+      - cp ${PIPELINE_NAME}_dashBoard.yaml  ${PIPELINE_NAME}-${SOURCE_VERSION}_dashBoard.yaml
+      - echo "Template and config files renamed for packaging and sending to S3."
+      # The versioned.zip simply gives us a place to store the files from this commit for future reference/rollback.
+      - zip -r versioned.zip ${PIPELINE_NAME}-${SOURCE_VERSION}.yaml ${PIPELINE_NAME}-${SOURCE_VERSION}_dashBoard.yaml ${PIPELINE_NAME}-${SOURCE_VERSION}-*.json 
+      - rm ${PIPELINE_NAME}-${SOURCE_VERSION}-*.json
+          
+      # The files in internal.zip is what is used by the pipeline to run its next deployment.
+      - zip -r internal.zip ${PIPELINE_NAME}.yaml ${PIPELINE_NAME}_dashBoard.yaml ${PIPELINE_NAME}-*.json 
+
+      # Store compiled templates in S3. Once this is done, CodePipeline will detect them and start execution.
+      - aws s3 cp versioned.zip s3://${BUCKET}/${PIPELINE_NAME}/ --sse aws:kms --sse-kms-key-id ${KEY_ID}
+      - aws s3 cp internal.zip s3://${BUCKET}/${PIPELINE_NAME}/ --sse aws:kms --sse-kms-key-id ${KEY_ID}
+
+      # Finally, Copy scripts that will run ON THE CLUSTER itself to S3. Create a versioned .zip for reference/rollback.
+      - aws s3 cp shared/scripts/ s3://${BUCKET}/emr/ --recursive
+      - aws s3 cp ${APP_PREFIX}/scripts/ s3://${BUCKET}/emr/ --recursive
+      - zip -r scripts-${SOURCE_VERSION}.zip shared/scripts ${APP_PREFIX}/scripts
+      - aws s3 cp scripts-${SOURCE_VERSION}.zip s3://${BUCKET}/emr/archive/
