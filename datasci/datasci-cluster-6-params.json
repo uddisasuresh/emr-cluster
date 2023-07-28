@@ -1,0 +1,7 @@
+{
+  "Parameters" : {
+    "MappingsPath": "s3://med-av-daas-preprod-datasci-cicd/emr/config/datasci-6-cicd-mappings.json",
+    "AdditionalEMRPropertiesPath": "s3://med-av-daas-preprod-datasci-cicd/emr/config/datasci-6-additional-emr-properties.json",
+    "AdditionalEMRResourcesPath": "s3://med-av-daas-preprod-datasci-cicd/emr/config/datasci-6-additional-emr-resources.json"
+  }
+}

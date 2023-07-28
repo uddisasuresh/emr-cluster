@@ -1,0 +1,290 @@
+{
+  "Name": "datasci-6.2.0",
+  "CustomAmiId": "{{resolve:ssm:/cicd/latest-amazon2:1}}",
+  "SecurityConfiguration": "datasci-security-configuration-v1",
+  "Instances": {
+      "MasterInstanceGroup": {
+          "InstanceCount": "1",
+          "InstanceType": "{{resolve:ssm:/datasci/emr/master-instance-type:1}}",
+          "Market": "ON_DEMAND",
+          "Name": "master",
+          "EbsConfiguration": {
+              "EbsBlockDeviceConfigs": [
+                  {
+                      "VolumeSpecification": {
+                          "SizeInGB": "100",
+                          "VolumeType": "gp2"
+                      },
+                      "VolumesPerInstance": "2"
+                  }
+              ],
+              "EbsOptimized": "false"
+          }
+      },
+      "CoreInstanceGroup": {
+          "InstanceCount": "5",
+          "InstanceType": "{{resolve:ssm:/datasci/emr/core-instance-type:1}}",
+          "Market": "ON_DEMAND",
+          "Name": "core"
+      },
+      "TerminationProtected": "false",
+      "Ec2KeyName": "{{resolve:ssm:/cicd/ec2-key-pair-name:1}}",
+      "Ec2SubnetId": "{{resolve:ssm:/cicd/internal-subnet-2:1}}",
+      "EmrManagedMasterSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-master:1}}",
+      "EmrManagedSlaveSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-slave:1}}",
+      "ServiceAccessSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-service-access:1}}",
+      "AdditionalMasterSecurityGroups": {
+          "Fn::Split": [",","{{resolve:ssm:/cicd/security-group-emr-additional-master:1}}"]
+      },
+      "AdditionalSlaveSecurityGroups": {
+          "Fn::Split": [",","{{resolve:ssm:/cicd/security-group-emr-additional-slave:1}}"]
+      }
+  },
+  "JobFlowRole": "av-datasci-emr-ec2",
+  "ServiceRole": "av-datasci-emr",
+  "AutoScalingRole": "av-datasci-emr-autoscaling",
+  "EbsRootVolumeSize":100,
+  "ReleaseLabel": "emr-6.2.0",
+  "VisibleToAllUsers": true,
+  "LogUri": {
+      "Fn::Sub": [
+          "s3://${bucket}/emr-log/",
+          {
+              "bucket": {
+                  "Fn::FindInMap": ["CicdBuckets",{ "Ref": "StageName"},"bucket"]
+              }
+          }
+      ]
+  },
+  "BootstrapActions": [
+     {
+      "Name": "bootstrap action 1",
+      "ScriptBootstrapAction": {
+         "Args": [],
+         "Path": { "Fn::Sub" : ["s3://${bucket}/emr/bootstrap/patch-log4j-emr-6.2.1-v1.sh",{"bucket": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]}}]}
+     }
+     },
+     {
+        "Name": "bootstrap action 2",
+        "ScriptBootstrapAction": {
+           "Args": [],
+           "Path": { "Fn::Sub" : ["s3://${bucket}/emr/bootstrap/datasci-BootstrapActionScript.sh",{"bucket": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]}}]}
+        }
+     }
+  ],
+  "Applications": [
+     {
+        "Name": "Spark"
+     },
+     {
+        "Name": "Ganglia"
+     },
+     {
+        "Name": "Hive"
+     },
+     {
+        "Name": "Livy"
+     },
+     {
+        "Name": "Zeppelin"
+     },
+     {
+        "Name": "presto"
+     },
+     {
+        "Name": "Zookeeper"
+     },
+     {
+        "Name": "Hue"
+     },
+     {
+        "Name": "Tez"
+     },
+     {
+        "Name": "Sqoop"
+     }
+
+  ],
+  "Configurations": [
+     {
+        "Classification": "hive-site",
+        "ConfigurationProperties": {
+           "hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory",
+           "hive.metastore.schema.verification": "false",
+           "datanucleus.fixedDatastore": "false",
+           "datanucleus.autoCreateSchema": "true",
+           "hive.aux.jars.path": "/var/lib/hive",
+           "mapreduce.fileoutputcommitter.algorithm.version": "2",
+           "hive.blobstore.optimizations.enabled": "false",
+           "mapred.reduce.child.java.opts": "-Duser.timezone=UTC",
+           "mapred.map.child.java.opts": "-Duser.timezone=UTC"
+        }
+     },
+     {
+        "Classification": "hive-env",
+        "ConfigurationProperties": {
+        },
+        "Configurations": [
+          {
+            "Classification": "export",
+            "ConfigurationProperties": {
+              "HADOOP_HEAPSIZE": "8192"
+            },
+            "Configurations": [
+
+            ]
+          }
+        ]
+      },
+
+      {
+        "Classification": "yarn-site",
+        "ConfigurationProperties": {
+          "yarn.resourcemanager.scheduler.class": "org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler",
+          "yarn.scheduler.minimum-allocation-mb": "3072",
+          "yarn.nodemanager.vmem-check-enabled" : "false",
+          "yarn.log-aggregation-enable": "true",
+          "yarn.log-aggregation.retain-seconds": "-1",
+          "yarn.nodemanager.remote-app-log-dir": { "Fn::Sub" : ["s3://${bucket}/var/log/hadoop-yarn/apps",{"bucket": {"Fn::FindInMap" :["Buckets", {"Ref": "StageName"}, "bucket"]}}]}
+        }
+      },
+     {
+        "Classification": "spark-hive-site",
+        "ConfigurationProperties": {
+           "hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory",
+           "datanucleus.fixedDatastore": "true",
+           "datanucleus.autoCreateSchema": "false",
+           "hive.aux.jars.path": "/var/lib/hive"
+        }
+     },
+     {
+        "Classification": "livy-conf",
+        "ConfigurationProperties": {
+          "livy.impersonation.enabled": "true",
+          "livy.server.session.timeout": "12h",
+          "livy.server.port": "8998",
+          "livy.spark.master": "yarn",
+		  "livy.spark.deploy-mode": "cluster"
+     }
+    },
+    {
+     "Classification": "zeppelin-env",
+     "ConfigurationProperties": {
+
+    },
+     "Configurations": [
+       {
+         "Classification": "export",
+         "ConfigurationProperties": {
+         "ZEPPELIN_NOTEBOOK_STORAGE":"org.apache.zeppelin.notebook.repo.S3NotebookRepo",
+         "ZEPPELIN_NOTEBOOK_S3_BUCKET":{ "Fn::Sub" : ["${bucket}",{"bucket": {"Fn::FindInMap" :["Buckets", {"Ref": "StageName"}, "bucket"]}}]},
+         "ZEPPELIN_NOTEBOOK_S3_USER":"zeppelin",
+         "ZEPPELIN_MEM":"-Xmx10000m -XX:MaxPermSize=2000m",
+         "ZEPPELIN_INTP_MEM":"-Xmx10000m -XX:MaxPermSize=2000m",
+         "PYTHONPATH":"${SPARK_HOME}/python:${SPARK_HOME}/python/lib/py4j-0.10.7-src.zip",
+         "SPARK_YARN_USER_ENV":"PYTHONPATH=${PYTHONPATH}",
+         "ZEPPELIN_WEBSOCKET_MAX_TEXT_MESSAGE_SIZE":"10240000",
+         "ZEPPELIN_INTERPRETER_OUTPUT_LIMIT":"1000000",
+         "ZEPPELIN_IMPERSONATE_CMD":"'sudo -H -u ${ZEPPELIN_IMPERSONATE_USER} bash -c '"
+
+         }
+       }
+     ]
+   },
+
+   {
+     "Classification": "spark-defaults",
+     "ConfigurationProperties": {
+       "spark.driver.extraClassPath":"/usr/lib/hadoop-lzo/lib/*:/usr/lib/hadoop/hadoop-aws.jar:/usr/share/aws/aws-java-sdk/*:/usr/share/aws/emr/emrfs/conf:/usr/share/aws/emr/emrfs/lib/*:/usr/share/aws/emr/emrfs/auxlib/*:/usr/share/aws/emr/security/conf:/usr/share/aws/emr/security/lib/*:/usr/share/aws/hmclient/lib/aws-glue-datacatalog-spark-client.jar:/usr/share/aws/emr/emrfs/lib/emrfs-hadoop-assembly-2.40.0.jar:/usr/share/java/Hive-JSON-Serde/hive-openx-serde.jar:/usr/share/aws/emr/s3select/lib/emr-s3-select-spark-connector.jar:/usr/share/aws/sagemaker-spark-sdk/lib/sagemaker-spark-sdk.jar:/home/hadoop/extrajars/*",
+       "spark.executor.extraClassPath":"/usr/lib/hadoop-lzo/lib/*:/usr/lib/hadoop/hadoop-aws.jar:/usr/share/aws/aws-java-sdk/*:/usr/share/aws/emr/emrfs/conf:/usr/share/aws/emr/emrfs/lib/*:/usr/share/aws/emr/emrfs/auxlib/*:/usr/share/aws/emr/security/conf:/usr/share/aws/emr/security/lib/*:/usr/share/aws/hmclient/lib/aws-glue-datacatalog-spark-client.jar:/usr/share/aws/emr/emrfs/lib/emrfs-hadoop-assembly-2.40.0.jar:/usr/share/java/Hive-JSON-Serde/hive-openx-serde.jar:/usr/share/aws/emr/s3select/lib/emr-s3-select-spark-connector.jar:/usr/share/aws/sagemaker-spark-sdk/lib/sagemaker-spark-sdk.jar:/home/hadoop/extrajars/*",
+       "spark.eventLog.enabled": "true",
+       "spark.dynamicAllocation.enabled": "false",
+       "spark.eventLog.dir": { "Fn::Sub" : ["s3://${bucket}/var/log/spark/apps",{"bucket": {"Fn::FindInMap" :["Buckets", {"Ref": "StageName"}, "bucket"]}}]},
+       "spark.driver.memory": "6144M",
+       "spark.driver.maxResultSize": "4096M",
+       "spark.ui.proxyBase": "/spark",
+       "spark.ui.reverseProxy": "true",
+       "spark.ui.reverseProxyUrl": "/spark"
+
+
+     }
+   },
+     {
+        "Classification": "presto-connector-hive",
+        "ConfigurationProperties": {
+           "hive.metastore": "glue"
+        }
+     },
+     {
+      "Classification": "hue-ini",
+      "ConfigurationProperties": {},
+      "Configurations": [
+          {
+              "Classification": "desktop",
+              "ConfigurationProperties": {},
+              "Configurations": [
+                  {
+                      "Classification": "ldap",
+                      "ConfigurationProperties": {},
+                      "Configurations": [
+                          {
+                              "Classification": "ldap_servers",
+                              "ConfigurationProperties": {},
+                              "Configurations": [
+                                  {
+                                      "Classification": "ge.com",
+                                      "ConfigurationProperties": {
+                                          "ldap_url": "ldaps://ProdIZvds.8389.corporate.ge.com:636",
+                                          "search_bind_authentication": "true",
+                                          "bind_dn": "Gessouid=E16A69EA-EF5E-17D6-8EE1-002128B20D70,ou=geworker,o=ge.com",
+                                          "bind_password": "{{resolve:ssm:/datasci/emr/hue-password:1}}",
+										  "base_dn": "OU=Standard,OU=Users,ou=enterprise,dc=vds,dc=logon"
+                                      },
+                                      "Configurations": [
+									  {
+										"Classification": "users",
+										"ConfigurationProperties": {
+										   "user_filter": "(&(objectclass=user)(memberOf=cn=APP_GE001000000_EMR_DSNONPROD,OU=Managed,OU=Groups,ou=enterprise,dc=vds,dc=logon))"	
+										}
+									  }
+									  ]
+                                  }
+                              ]
+                          }
+                      ]
+                  },
+                  {
+                      "Classification": "auth",
+                      "ConfigurationProperties": {
+                       "backend": "desktop.auth.backend.LdapBackend"
+                            }
+                  }
+              ]
+          }
+          
+      ]
+  }
+  ],
+  "Tags": [
+     {
+        "Key": "uai",
+        "Value": "{{resolve:ssm:/datasci/emr/uai-tag:1}}"
+     },
+     {
+        "Key": "product",
+        "Value": "datasci"
+     },
+     {
+        "Key": "org",
+        "Value": "cdoo"
+     },
+     {
+         "Key": "Name",
+         "Value": "datasci-6.2.0"
+     },
+     {
+        "Key": "2fa_access_group",
+        "Value": "{{resolve:ssm:/datasci/2fa-emr-tag:1}}"
+     }
+  ]
+}

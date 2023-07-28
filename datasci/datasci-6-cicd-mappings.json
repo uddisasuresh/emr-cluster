@@ -1,0 +1,24 @@
+{
+    "Buckets": {
+        "dev": {
+            "bucket": "med-av-daas-preprod-datasci"
+        },
+        "stage": {
+            "bucket": "med-av-daas-preprod-datasci"
+        },
+        "prod": {
+            "bucket": "med-av-daas-prod-datasci"
+        }
+    },
+    "CicdBuckets": {
+        "dev": {
+            "bucket": "med-av-daas-preprod-datasci-cicd"
+        },
+        "stage": {
+            "bucket": "med-av-daas-preprod-datasci-cicd"
+        },
+        "prod": {
+            "bucket": "med-av-daas-prod-datasci-cicd"
+        }
+    }
+}

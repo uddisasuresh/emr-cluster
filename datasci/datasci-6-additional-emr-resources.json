@@ -1,0 +1,415 @@
+{
+   "MySNSTopic" : {
+      "Type" : "AWS::SNS::Topic",
+      "Properties" : {
+          "DisplayName" :
+          {
+              "Fn::Join": ["", [{"Ref": "AWS::StackName"},"- Stack Notifications"]]
+          },
+        "Subscription" : [
+                        {
+                                "Endpoint" : {"Fn::GetAtt": ["CustomEmailLambda", "Arn"] },
+                                "Protocol" : "lambda"
+                        }
+                ],
+        "TopicName" :
+        {
+          "Fn::Join": ["", [{"Ref": "AWS::StackName"},"-stack-notifications"]]
+        }
+      },
+          "DependsOn":"CustomEmailLambda"
+   },
+   "EmailSNSTopic" : {
+      "Type" : "AWS::SNS::Topic",
+      "Properties" : {
+          "DisplayName" :
+          {
+              "Fn::Join": ["", [{"Ref": "AWS::StackName"},"- Stack Email Notifications"]]
+          },
+        "Subscription" : [
+        {
+        "Endpoint" : "aviation_dba_x1_alerts@ge.com",
+        "Protocol" : "email"
+        }],
+        "TopicName" :
+        {
+          "Fn::Join": ["", [{"Ref": "AWS::StackName"},"-stack-email-notifications"]]
+        }
+      }
+   },
+   "CustomEmailLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+         "FunctionName": {
+            "Fn::Join": ["", [{"Ref": "AWS::StackName"},"-custom-email-lambda"]]
+            },
+        "Timeout": 60,
+        "Handler": "custom_email.handler",
+        "Runtime": "python3.8",
+        "Role": { "Fn::Join": [ "",[{"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/av-"},{"Fn::Select": [0,{"Fn::Split": ["-",{"Fn::Sub": "${AWS::StackName}"}]}]},"-lambda"]]},
+          "Environment": {
+          "Variables": {
+            "ALERTACTION": { "Ref": "EmailSNSTopic" },
+                           "BUCKET": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]},
+                           "APPLICATION_CI": "{{resolve:ssm:/datasci/emr/ci:1}}",
+                           "CPUUTILIZATION_FILE": "emr/bootstrap/CPUUtilization.txt",
+                           "DISKSPACEUTILIZATION_FILE": "emr/bootstrap/DiskSpaceUtilization.txt",
+                           "MEMORYUTILIZATION_FILE": "emr/bootstrap/MemoryUtilization.txt",
+                           "EVENT_MANAGEMENT_PASSWORD": "{{resolve:ssm:/datasci/emr/event-password:1}}",
+                           "EVENT_MANAGEMENT_URL": "{{resolve:ssm:/datasci/emr/event-url:1}}",
+                           "EVENT_MANAGEMENT_USER": "AVI-datasci-qa",
+                           "REPORTED_BY": "{{resolve:ssm:/datasci/emr/reported:1}}",
+                           "THRESHOLD_VALUE": "85",
+                           "TIME_DIFF": "5",
+                           "UAI": "{{resolve:ssm:/datasci/emr/uai-tag:1}}"
+          }
+      },
+        "Code": {
+                  "S3Bucket" : {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]},
+                  "S3Key" : "emr/bootstrap/dashboard/custom_email.zip"
+        }
+      },
+      "DependsOn":"EmailSNSTopic"
+    },
+    "PermissionForSNSToInvokeLambda": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": { "Ref": "CustomEmailLambda" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": { "Ref": "MySNSTopic" }
+      }
+    },
+    "EventRuleCustomEmail": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "EventRule",
+        "EventPattern": {
+            "source": [ "aws.emr" ],
+            "detail-type": ["EMR Cluster State Change"],
+                        "detail": {
+                            "clusterId": [{ "Ref": "EMRCluster" }],
+                            "state": ["TERMINATED_WITH_ERRORS", "TERMINATED"]
+                        }
+          },
+          "State": "ENABLED",
+          "Targets": [{
+          "Arn": { "Ref": "MySNSTopic" },
+          "Id": "TargetFunctionV2"
+        }]
+      }
+    },
+        "MySNSTopicPolicy": {
+          "Type": "AWS::SNS::TopicPolicy",
+          "Properties": {
+                "PolicyDocument": {
+                  "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Principal": { "Service": ["events.amazonaws.com","cloudwatch.amazonaws.com" ]},
+                          "Action": [
+                                "SNS:GetTopicAttributes",
+                                "SNS:SetTopicAttributes",
+                                "SNS:AddPermission",
+                                "SNS:RemovePermission",
+                                "SNS:DeleteTopic",
+                                "SNS:Subscribe",
+                                "SNS:ListSubscriptionsByTopic",
+                                "SNS:Publish",
+                                "SNS:Receive"
+                          ],
+                          "Resource": { "Ref": "MySNSTopic" }
+                        }
+                  ]
+                },
+                "Topics": [ { "Ref": "MySNSTopic" } ]
+          }
+        },
+   "Dashboard": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+         "FunctionName": {
+            "Fn::Join": ["", [{"Ref": "AWS::StackName"},"-lambda"]]
+            },
+        "Timeout": 60,
+        "Handler": "index.handler",
+        "Runtime": "python3.8",
+        "Role": { "Fn::Join": [ "",[{"Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/av-"},{"Fn::Select": [0,{"Fn::Split": ["-",{"Fn::Sub": "${AWS::StackName}"}]}]},"-lambda"]]},
+          "Environment": {
+          "Variables": {
+              "BUCKET": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]},
+              "ALERTACTION": { "Ref": "MySNSTopic" },
+                          "CPU_WARN_THRESHOLD": "{{resolve:ssm:/datasci/emr/cpu/warn/threshold:1}}",
+                          "CPU_CRIT_THRESHOLD": "{{resolve:ssm:/datasci/emr/cpu/crit/threshold:1}}",
+                          "MEM_WARN_THRESHOLD": "{{resolve:ssm:/datasci/emr/mem/warn/threshold:1}}",
+                          "MEM_CRIT_THRESHOLD": "{{resolve:ssm:/datasci/emr/mem/crit/threshold:1}}",
+                          "DISK_THRESHOLD": "{{resolve:ssm:/datasci/emr/disk/threshold:1}}"
+
+          }
+      },
+        "Code": {
+                  "S3Bucket" : {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]},
+                  "S3Key" : "emr/bootstrap/dashboard/index.zip"
+        }
+      },
+      "DependsOn":"MySNSTopic"
+    },
+   "EventRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "EventRule",
+        "EventPattern": {
+            "source": [
+              "aws.emr"
+            ],
+            "detail-type": [
+              "EMR Cluster State Change",
+              "EMR Instance Group State Change",
+              "EMR Instance Fleet State Change"
+
+            ],
+            "detail": {
+              "clusterId": [
+                 { "Ref": "EMRCluster" }
+              ]
+            }
+          },
+          "State": "ENABLED",
+          "Targets": [{
+          "Arn": { "Fn::GetAtt": ["Dashboard", "Arn"] },
+          "Id": "TargetFunctionV1"
+        }]
+      }
+    },
+   "PermissionForEventsToInvokeLambda": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName":{
+          "Fn::Join": ["", [{"Ref": "AWS::StackName"},"-lambda"]]
+          },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": { "Fn::GetAtt": ["EventRule", "Arn"] }
+      }
+    },
+   "TaskInstanceGroupConfig": {
+      "Type": "AWS::EMR::InstanceGroupConfig",
+      "Properties": {
+         "Name": "datasci-task-group",
+         "InstanceCount": 1,
+         "InstanceType": "{{resolve:ssm:/datasci/emr/task-instance-type:1}}",
+         "InstanceRole": "TASK",
+         "Market": "ON_DEMAND",
+         "JobFlowId": {
+            "Ref": "EMRCluster"
+         },
+         "AutoScalingPolicy": {
+            "Constraints": {
+               "MinCapacity": "0",
+               "MaxCapacity": "30"
+            },
+            "Rules": [
+               {
+                  "Name": "scale-out1",
+                  "Description": "Replicates the default scale-out rule in the console for YARN memory.",
+                  "Action": {
+                     "SimpleScalingPolicyConfiguration": {
+                        "AdjustmentType": "CHANGE_IN_CAPACITY",
+                        "ScalingAdjustment": 5,
+                        "CoolDown": 600
+                     }
+                  },
+                  "Trigger": {
+                     "CloudWatchAlarmDefinition": {
+                        "ComparisonOperator": "LESS_THAN",
+                        "EvaluationPeriods": 1,
+                        "MetricName": "YARNMemoryAvailablePercentage",
+                        "Namespace": "AWS/ElasticMapReduce",
+                        "Period": 300,
+                        "Threshold": 30,
+                        "Statistic": "AVERAGE",
+                        "Unit": "PERCENT",
+                        "Dimensions": [
+                           {
+                              "Key": "JobFlowId",
+                              "Value": "${emr.clusterId}"
+                           }
+                        ]
+                     }
+                  }
+               },
+               {
+                "Name": "scale-out2",
+                "Description": "Replicates the default scale-out rule in the console for YARN memory.",
+                "Action": {
+                   "SimpleScalingPolicyConfiguration": {
+                      "AdjustmentType": "CHANGE_IN_CAPACITY",
+                      "ScalingAdjustment": 5,
+                      "CoolDown": 600
+                   }
+                },
+                "Trigger": {
+                   "CloudWatchAlarmDefinition": {
+                      "ComparisonOperator": "GREATER_THAN",
+                      "EvaluationPeriods": 1,
+                      "MetricName": "ContainerPendingRatio",
+                      "Namespace": "AWS/ElasticMapReduce",
+                      "Period": 300,
+                      "Threshold": 0.01,
+                      "Statistic": "AVERAGE",
+                      "Unit": "COUNT",
+                      "Dimensions": [
+                         {
+                            "Key": "JobFlowId",
+                            "Value": "${emr.clusterId}"
+                         }
+                      ]
+                   }
+                }
+             },
+               {
+                  "Name": "scale-in",
+                  "Description": "Replicates the default scale-in rule in the console for YARN memory.",
+                  "Action": {
+                     "SimpleScalingPolicyConfiguration": {
+                        "AdjustmentType": "CHANGE_IN_CAPACITY",
+                        "ScalingAdjustment": -5,
+                                "CoolDown": 600
+                     }
+                  },
+                  "Trigger": {
+                         "CloudWatchAlarmDefinition": {
+                        "ComparisonOperator": "GREATER_THAN",
+                        "EvaluationPeriods": 3,
+                        "MetricName": "YARNMemoryAvailablePercentage",
+                        "Namespace": "AWS/ElasticMapReduce",
+                        "Period": 120,
+                        "Threshold": 70,
+                        "Statistic": "AVERAGE",
+                        "Unit": "PERCENT",
+                        "Dimensions": [
+                           {
+                              "Key": "JobFlowId",
+                              "Value": "${emr.clusterId}"
+                           }
+                        ]
+                     }
+                  }
+               }
+            ]
+         }
+      }
+   },
+   "SSMParameterCluterId": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+          "Name": {
+              "Fn::Join": [
+                  "",
+                  [
+                      "/",
+                      {
+                          "Fn::Select": [
+                              0,
+                              {
+                                  "Fn::Split": [
+                                      "-",
+                                      {
+                                          "Ref": "AWS::StackName"
+                                      }
+                                  ]
+                              }
+                          ]
+                      },
+                      "/",
+                      {
+                          "Ref": "AWS::StackName"
+                      },
+                      "-dashBoard/EMR/ClusterId"
+                  ]
+              ]
+          },
+          "Type": "String",
+          "Value": {
+              "Ref": "EMRCluster"
+          },
+          "Description": "SSM Parameter for event rule.",
+          "Tier": "Standard"
+      }
+  },
+
+   "HDFSUtilization": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+            "AlarmName": {
+            "Fn::Join": ["", ["datasci-",{"Ref": "EMRCluster"},"-HDFSUtilization"]]
+            },
+            "AlarmActions": [{ "Ref": "MySNSTopic" }],
+            "ComparisonOperator": "GreaterThanThreshold",
+            "AlarmDescription": "Alarm when HDFS utilization exceeds 80%",
+            "Dimensions": [
+               {
+                  "Name": "JobFlowId",
+                  "Value": { "Ref": "EMRCluster" }
+               }
+            ],
+            "EvaluationPeriods": 2,
+            "MetricName": "HDFSUtilization",
+            "Namespace": "AWS/ElasticMapReduce",
+            "Period": 300,
+            "Statistic": "Average",
+            "Threshold": 80
+      }
+   },
+   
+   "YARNUtilization": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+            "AlarmName": {
+            "Fn::Join": ["", ["datasci-",{"Ref": "EMRCluster"},"-YarnUtilization"]]
+            },
+            "AlarmActions": [{ "Ref": "MySNSTopic" }],
+            "ComparisonOperator": "LessThanThreshold",
+            "AlarmDescription": "Alarm when YARN utilization exceeds 90%",
+            "Dimensions": [
+               {
+                  "Name": "JobFlowId",
+                  "Value": { "Ref": "EMRCluster" }
+               }
+            ],
+            "EvaluationPeriods": 2,
+            "MetricName": "YARNMemoryAvailablePercentage",
+            "Namespace": "AWS/ElasticMapReduce",
+            "Period": 300,
+            "Statistic": "Average",
+            "Threshold": 10
+      }
+   },
+
+   "MRUnhealthyNodes": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+          "AlarmName": {
+            "Fn::Join": ["", ["datasci-",{"Ref": "EMRCluster"},"-MRUnhealthyNodes"]]
+            },
+          "AlarmActions": [{ "Ref": "EmailSNSTopic" }],
+          "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+          "AlarmDescription": "Alarm when MRUnhealthyNodes => 1",
+          "Dimensions": [
+              {
+                  "Name": "JobFlowId",
+                  "Value": { "Ref": "EMRCluster" }
+              }
+          ],
+          "EvaluationPeriods": 1,
+          "MetricName": "MRUnhealthyNodes",
+          "Namespace": "AWS/ElasticMapReduce",
+          "Period": 60,
+          "Statistic": "Average",
+          "Threshold": 1
+      }
+
+  }
+}
+
+
