@@ -3,13 +3,12 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Description: Generic EMR template. This creates an EMR cluster using DOS CI/CD with help from the 'Include' Transform in CloudFormation.
 Parameters:
-  ApplicationPrefix:
-    Description: Prefix to identify the team.  (i.e. platform, ca, etc.)
-    Type: String
+
   StageName: #Required. Do not remove. The CI/CD pipeline will pass in the appropriate value.
     Type: String
     Default: stage
     AllowedValues: [dev, stage, prod]
+
   MappingsPath:
     Description: Path for team mappings (cicd buckets, etc.) Included in AWS Transform below.
     Type: String
@@ -19,14 +18,16 @@ Parameters:
   AdditionalEMRResourcesPath:
     Description: Path for additional EMR resources a team might have(Steps, InstanceGroupConfig, etc.). Included in AWS Transform below.
     Type: String
+
 #This is a mappings file for team-based buckets, etc.
 Mappings:
   'Fn::Transform':
     Name: 'AWS::Include'
     Parameters:
-      Location: !Sub 's3://med-av-daas-preprod-${ApplicationPrefix}-cicd/emr/config/${AWS::StackName}/${MappingsPath}'
+      Location: !Ref MappingsPath
 
 Resources:
+
   EMRCluster:
     Type: AWS::EMR::Cluster
     Properties:
@@ -35,10 +36,10 @@ Resources:
       'Fn::Transform':
         Name: 'AWS::Include'
         Parameters:
-          Location: !Sub 's3://med-av-daas-preprod-${ApplicationPrefix}-cicd/emr/config/${AWS::StackName}/${AdditionalEMRPropertiesPath}'
+          Location: !Ref AdditionalEMRPropertiesPath
 
   #This includes any additional EMR-related resources you may need.
   'Fn::Transform':
     Name: 'AWS::Include'
     Parameters:
-      Location: !Sub 's3://med-av-daas-preprod-${ApplicationPrefix}-cicd/emr/config/${AWS::StackName}/${AdditionalEMRResourcesPath}'
+      Location: !Ref AdditionalEMRResourcesPath
