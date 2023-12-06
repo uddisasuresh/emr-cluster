@@ -39,6 +39,7 @@ Resources:
           Location: !Ref AdditionalEMRPropertiesPath
 
   #This includes any additional EMR-related resources you may need.
+  #This includes all the EMR properties.
   'Fn::Transform':
     Name: 'AWS::Include'
     Parameters:
