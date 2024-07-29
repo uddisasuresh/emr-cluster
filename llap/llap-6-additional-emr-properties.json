@@ -1,49 +1,48 @@
 {
-  "Name": "datasci-6.2.0",
-  "CustomAmiId": "{{resolve:ssm:/cicd/latest-amazon2:1}}",
-  "SecurityConfiguration": "datasci-security-configuration-v1",
+  "Name": "test-cluster",
+  "SecurityConfiguration": "llap-security-configuration-v1",
   "Instances": {
       "MasterInstanceGroup": {
           "InstanceCount": "1",
-          "InstanceType": "{{resolve:ssm:/datasci/emr/master-instance-type:1}}",
+          "InstanceType": "m5.xlarge",
           "Market": "ON_DEMAND",
           "Name": "master",
           "EbsConfiguration": {
               "EbsBlockDeviceConfigs": [
                   {
                       "VolumeSpecification": {
-                          "SizeInGB": "100",
+                          "SizeInGB": "10",
                           "VolumeType": "gp2"
                       },
-                      "VolumesPerInstance": "2"
+                      "VolumesPerInstance": "1"
                   }
               ],
               "EbsOptimized": "false"
           }
       },
       "CoreInstanceGroup": {
-          "InstanceCount": "5",
-          "InstanceType": "{{resolve:ssm:/datasci/emr/core-instance-type:1}}",
+          "InstanceCount": "1",
+          "InstanceType": "m5.xlarge",
           "Market": "ON_DEMAND",
           "Name": "core"
       },
       "TerminationProtected": "false",
-      "Ec2KeyName": "{{resolve:ssm:/cicd/ec2-key-pair-name:1}}",
-      "Ec2SubnetId": "{{resolve:ssm:/cicd/internal-subnet-2:1}}",
-      "EmrManagedMasterSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-master:1}}",
-      "EmrManagedSlaveSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-slave:1}}",
-      "ServiceAccessSecurityGroup": "{{resolve:ssm:/cicd/security-group-emr-service-access:1}}",
+      "Ec2KeyName": "sureshtest",
+      "Ec2SubnetId": "subnet-0c8b376cd5f551b07",
+      "EmrManagedMasterSecurityGroup": "sg-0d76a81ffabd855bb",
+      "EmrManagedSlaveSecurityGroup": "sg-0d76a81ffabd855bb",
+      "ServiceAccessSecurityGroup": "sg-0d76a81ffabd855bb",
       "AdditionalMasterSecurityGroups": {
-          "Fn::Split": [",","{{resolve:ssm:/cicd/security-group-emr-additional-master:1}}"]
+          "Fn::Split": [",","sg-0d76a81ffabd855bb"]
       },
       "AdditionalSlaveSecurityGroups": {
-          "Fn::Split": [",","{{resolve:ssm:/cicd/security-group-emr-additional-slave:1}}"]
+          "Fn::Split": [",","sg-0d76a81ffabd855bb"]
       }
   },
-  "JobFlowRole": "av-datasci-emr-ec2",
-  "ServiceRole": "av-datasci-emr",
-  "AutoScalingRole": "av-datasci-emr-autoscaling",
-  "EbsRootVolumeSize":100,
+  "JobFlowRole": "av-llap-emr-ec2",
+  "ServiceRole": "av-llap-emr",
+  "AutoScalingRole": "av-llap-emr-autoscaling",
+  "EbsRootVolumeSize":10,
   "ReleaseLabel": "emr-6.2.0",
   "VisibleToAllUsers": true,
   "LogUri": {

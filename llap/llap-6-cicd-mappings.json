@@ -1,24 +1,24 @@
 {
     "Buckets": {
         "dev": {
-            "bucket": "med-av-daas-preprod-datasci"
+            "bucket": "med-av-daas-preprod-llap"
         },
         "stage": {
-            "bucket": "med-av-daas-preprod-datasci"
+            "bucket": "med-av-daas-preprod-llap"
         },
         "prod": {
-            "bucket": "med-av-daas-prod-datasci"
+            "bucket": "med-av-daas-prod-llap"
         }
     },
     "CicdBuckets": {
         "dev": {
-            "bucket": "med-av-daas-preprod-datasci-cicd"
+            "bucket": "med-av-daas-preprod-llap-cicd"
         },
         "stage": {
-            "bucket": "med-av-daas-preprod-datasci-cicd"
+            "bucket": "med-av-daas-preprod-llap-cicd"
         },
         "prod": {
-            "bucket": "med-av-daas-prod-datasci-cicd"
+            "bucket": "med-av-daas-prod-llap-cicd"
         }
     }
 }
