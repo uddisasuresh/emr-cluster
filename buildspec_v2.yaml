@@ -8,6 +8,7 @@ phases:
     
       - echo WebHook Event = $CODEBUILD_WEBHOOK_EVENT 
       - SOURCE_VERSION=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo $SOURCE_VERSION
 
       - pip3 install yamllint
       
@@ -30,11 +31,12 @@ phases:
       # EMR is not a serverless service. However, doing this allows us to mix Step, Lambda, etc. in the same template later. 
       - sam build -t $TEMPLATE
       - sam package --output-template-file ${PIPELINE_NAME}.yaml --s3-bucket $BUCKET --s3-prefix $S3_PREFIX
-      
+
       # Validate SAM template of cwd_template.yaml . If using SAM, keep this.
       - sam validate --template cwd_template.yaml
       - sam build -t cwd_template.yaml
       - sam package --output-template-file ${PIPELINE_NAME}_dashBoard.yaml --s3-bucket $BUCKET --s3-prefix $S3_PREFIX
+      - ls -ltrh
 
       - echo "sending bootstrap files to s3"
       - aws s3 sync bootstrap/${APP_PREFIX}/ s3://med-av-daas-preprod-${APP_PREFIX}-cicd/emr/bootstrap/
@@ -43,6 +45,7 @@ phases:
       - aws s3 sync ${APP_PREFIX}/ s3://med-av-daas-preprod-${APP_PREFIX}-cicd/emr/config/${PIPELINE_NAME}-prod/
       - cd ${APP_PREFIX}
       - configs=`ls *.json`
+      - echo $configs
       - for config in $configs;
           do
             cp $config ${PIPELINE_NAME}-$config;
