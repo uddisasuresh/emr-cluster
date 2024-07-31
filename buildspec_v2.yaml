@@ -8,6 +8,7 @@ phases:
     
       - echo WebHook Event = $CODEBUILD_WEBHOOK_EVENT 
       - SOURCE_VERSION=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo $SOURCE_VERSION
 
       - pip3 install yamllint
       
