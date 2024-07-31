@@ -71,7 +71,7 @@ phases:
       - aws s3 cp internal.zip s3://${BUCKET}/${PIPELINE_NAME}/ --sse aws:kms --sse-kms-key-id ${KEY_ID}
 
       # Finally, Copy scripts that will run ON THE CLUSTER itself to S3. Create a versioned .zip for reference/rollback.
-      - aws s3 cp shared/scripts/ s3://${BUCKET}/emr/ --recursive
-      - aws s3 cp ${APP_PREFIX}/scripts/ s3://${BUCKET}/emr/ --recursive
-      - zip -r scripts-${SOURCE_VERSION}.zip shared/scripts ${APP_PREFIX}/scripts
-      - aws s3 cp scripts-${SOURCE_VERSION}.zip s3://${BUCKET}/emr/archive/
+      # - aws s3 cp shared/scripts/ s3://${BUCKET}/emr/ --recursive
+      # - aws s3 cp ${APP_PREFIX}/scripts/ s3://${BUCKET}/emr/ --recursive
+      # - zip -r scripts-${SOURCE_VERSION}.zip shared/scripts ${APP_PREFIX}/scripts
+      # - aws s3 cp scripts-${SOURCE_VERSION}.zip s3://${BUCKET}/emr/archive/
