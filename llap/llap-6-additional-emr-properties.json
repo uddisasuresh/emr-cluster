@@ -60,7 +60,7 @@
       "Name": "bootstrap action 1",
       "ScriptBootstrapAction": {
          "Args": [],
-         "Path": { "Fn::Sub" : ["s3://${bucket}/emr/bootstrap/patch-log4j-emr-6.2.1-v1.sh",{"bucket": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]}}]}
+         "Path": { "Fn::Sub" : ["s3://${bucket}/emr/bootstrap/test.sh",{"bucket": {"Fn::FindInMap" :["CicdBuckets", {"Ref": "StageName"}, "bucket"]}}]}
      }
      }
   ],
