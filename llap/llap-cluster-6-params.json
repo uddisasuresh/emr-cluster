@@ -1,7 +1,7 @@
 {
   "Parameters" : {
-    "MappingsPath": "s3://med-av-daas-preprod-llap-cicd/emr/config/llap-6-cicd-mappings.json",
-    "AdditionalEMRPropertiesPath": "s3://med-av-daas-preprod-llap-cicd/emr/config/llap-6-additional-emr-properties.json",
-    "AdditionalEMRResourcesPath": "s3://med-av-daas-preprod-llap-cicd/emr/config/llap-6-additional-emr-resources.json"
+    "MappingsPath": "llap-6-cicd-mappings.json",
+    "AdditionalEMRPropertiesPath": "llap-6-additional-emr-properties.json",
+    "AdditionalEMRResourcesPath": "llap-6-additional-emr-resources.json"
   }
 }
