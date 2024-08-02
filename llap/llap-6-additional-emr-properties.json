@@ -1,6 +1,5 @@
 {
   "Name": "test-cluster",
-  "SecurityConfiguration": "llap-security-configuration-v1",
   "Instances": {
       "MasterInstanceGroup": {
           "InstanceCount": "1",
