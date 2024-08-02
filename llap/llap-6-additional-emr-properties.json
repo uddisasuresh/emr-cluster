@@ -31,7 +31,7 @@
       "Ec2SubnetId": "subnet-0c8b376cd5f551b07",
       "EmrManagedMasterSecurityGroup": "sg-0d76a81ffabd855bb",
       "EmrManagedSlaveSecurityGroup": "sg-0d76a81ffabd855bb",
-      "ServiceAccessSecurityGroup": "sg-0d76a81ffabd855bb",
+      "ServiceAccessSecurityGroup": "sg-001c5635010c4ce8c",
       "AdditionalMasterSecurityGroups": {
           "Fn::Split": [",","sg-0d76a81ffabd855bb"]
       },
