@@ -67,33 +67,11 @@
         "Name": "Spark"
      },
      {
-        "Name": "Ganglia"
-     },
-     {
         "Name": "Hive"
      },
      {
-        "Name": "Livy"
-     },
-     {
-        "Name": "Zeppelin"
-     },
-     {
         "Name": "presto"
-     },
-     {
-        "Name": "Zookeeper"
-     },
-     {
-        "Name": "Hue"
-     },
-     {
-        "Name": "Tez"
-     },
-     {
-        "Name": "Sqoop"
      }
-
   ],
   "Tags": [
      {
